@@ -70,16 +70,7 @@ class ChooseCharacter extends StatelessWidget {
             ),
             itemCount: _characters.length,
             itemBuilder: (context, index) => ListTile(
-              title: RichText(
-                text: TextSpan(
-                  children: [
-                    TextSpan(text: 'Login as '),
-                    TextSpan(
-                        text: _characters[index]['name'],
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
+              title: Text('Login as ${_characters[index]['name']}'),
               leading: CircleAvatar(
                 backgroundImage: AssetImage(_characters[index]['image']),
               ),

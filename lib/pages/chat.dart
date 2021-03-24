@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_chat/models/chat_model.dart';
+import 'package:flutter_chat/models/conversation_model.dart';
 import 'package:flutter_chat/models/user_model.dart';
 import 'package:flutter_chat/services/chat_service.dart';
 import 'package:provider/provider.dart';
@@ -19,10 +22,8 @@ class _ChatState extends State<Chat> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        leading: Row(
+        title: Row(
           children: [
-            SizedBox(width: 10),
-            BackButton(),
             CircleAvatar(
               backgroundImage: AssetImage(widget.user.image),
               radius: 15,
@@ -31,58 +32,100 @@ class _ChatState extends State<Chat> {
             Text(widget.user.name),
           ],
         ),
-        leadingWidth: double.infinity,
+        leadingWidth: 30,
+        centerTitle: false,
       ),
       body: SafeArea(
-        child: MultiProvider(
-          providers: [
-            StreamProvider<List<ChatModel>>.value(
-              value: ChatService(
-                      userId: widget.user.id, authId: widget.currentUser.id)
-                  .chats,
-              initialData: [],
-            ),
-          ],
-          child: _ChatList(
-            user: widget.user,
-            currentUser: widget.currentUser,
-          ),
+        child: FutureBuilder(
+          future: ChatService(
+                  userId: widget.user.id, currentUserId: widget.currentUser.id)
+              .getChat(),
+          builder: (context, snapshot) {
+            // Check for errors
+            if (snapshot.hasError) {
+              return Center(child: Text('Something went wrong'));
+            }
+
+            // Show app
+            if (snapshot.connectionState == ConnectionState.done) {
+              return MultiProvider(
+                providers: [
+                  StreamProvider<List<ConversationModel>>.value(
+                    value: ChatService(chatId: snapshot.data).conversations,
+                    initialData: [],
+                  ),
+                  StreamProvider<ChatModel>.value(
+                    value: ChatService(chatId: snapshot.data).chat,
+                    initialData: null,
+                  ),
+                ],
+                child: _ChatList(
+                  user: widget.user,
+                  currentUser: widget.currentUser,
+                ),
+              );
+            }
+
+            // Show loading
+            return Center(
+              child: Container(
+                height: 30,
+                width: 30,
+                child: CircularProgressIndicator(),
+              ),
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class _ChatList extends StatelessWidget {
+class _ChatList extends StatefulWidget {
   final UserModel user;
   final UserModel currentUser;
 
   _ChatList({this.user, this.currentUser});
 
+  @override
+  __ChatListState createState() => __ChatListState();
+}
+
+class __ChatListState extends State<_ChatList> {
   final TextEditingController chatController = new TextEditingController();
+
+  Timer _typingTimer;
 
   @override
   Widget build(BuildContext context) {
-    final List<ChatModel> _chats = context.watch<List<ChatModel>>();
+    final List<ConversationModel> _conversations =
+        context.watch<List<ConversationModel>>();
 
-    if (_chats == null) {
+    final ChatModel _chat = context.watch<ChatModel>();
+
+    if (_conversations == null || _chat == null) {
       return Center(child: CircularProgressIndicator());
     }
+
+    final ChatService _chatService = ChatService(chatId: _chat.id);
 
     return Column(
       children: [
         Expanded(
           child: ListView.builder(
             padding: EdgeInsets.symmetric(horizontal: 10),
-            itemCount: _chats.length,
+            itemCount: _conversations.length,
             reverse: true,
             itemBuilder: (context, index) => _Chat(
-              chat: _chats[index],
-              user: user,
-              currentUser: currentUser,
+              conversation: _conversations[index],
+              user: widget.user,
+              currentUser: widget.currentUser,
             ),
           ),
         ),
+        if (_chat.status[widget.user.id] == 'typing') ...[
+          _ChatTyping(user: widget.user)
+        ],
         Padding(
           padding: EdgeInsets.all(10),
           child: TextFormField(
@@ -98,20 +141,37 @@ class _ChatList extends StatelessWidget {
               ),
               contentPadding: EdgeInsets.symmetric(vertical: 5, horizontal: 20),
               suffixIcon: IconButton(
-                  icon: Icon(Icons.send),
-                  onPressed: () async {
-                    if (chatController.text != '') {
-                      dynamic result = await ChatService().addChat(
-                          currentUser.id, chatController.text, user.id);
+                icon: Icon(Icons.send),
+                onPressed: () async {
+                  if (chatController.text != '') {
+                    dynamic result = await _chatService.addChat(
+                        widget.currentUser.id,
+                        chatController.text,
+                        widget.user.id);
 
-                      if (result != null) {
-                        chatController.text = '';
-                      }
+                    if (result != null) {
+                      chatController.text = '';
                     }
-                  }),
+                  }
+                },
+              ),
             ),
             maxLines: null,
             controller: chatController,
+            onChanged: (value) {
+              const duration = Duration(milliseconds: 2000);
+
+              if (_typingTimer != null) {
+                _typingTimer.cancel();
+              }
+
+              if (_chat.status[widget.currentUser.id] != 'typing') {
+                _chatService.updateTypingStatus(widget.currentUser.id);
+              }
+
+              _typingTimer = Timer(duration,
+                  () => _chatService.updateIdleStatus(widget.currentUser.id));
+            },
           ),
         ),
       ],
@@ -120,16 +180,18 @@ class _ChatList extends StatelessWidget {
 }
 
 class _Chat extends StatelessWidget {
-  final ChatModel chat;
+  final ConversationModel conversation;
   final UserModel user;
   final UserModel currentUser;
 
-  _Chat({this.chat, this.user, this.currentUser});
+  _Chat({this.conversation, this.user, this.currentUser});
 
   @override
   Widget build(BuildContext context) {
+    final ChatModel _chat = context.watch<ChatModel>();
+
     // check if the chat belongs to the current user
-    if (currentUser.id == chat.author) {
+    if (currentUser.id == conversation.author) {
       return Padding(
         padding: EdgeInsets.symmetric(vertical: 10),
         child: Row(
@@ -142,7 +204,7 @@ class _Chat extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                chat.message,
+                conversation.message,
                 style: TextStyle(color: Colors.white),
               ),
             ),
@@ -161,6 +223,11 @@ class _Chat extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.start,
         children: [
+          CircleAvatar(
+            backgroundImage: AssetImage(user.image),
+            radius: 15,
+          ),
+          SizedBox(width: 10),
           Container(
             padding: EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -168,15 +235,34 @@ class _Chat extends StatelessWidget {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              chat.message,
+              conversation.message,
               style: TextStyle(color: Colors.white),
             ),
           ),
-          SizedBox(width: 10),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChatTyping extends StatelessWidget {
+  final UserModel user;
+
+  _ChatTyping({this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.all(10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
           CircleAvatar(
             backgroundImage: AssetImage(user.image),
             radius: 15,
           ),
+          SizedBox(width: 10),
+          Text('typing...')
         ],
       ),
     );

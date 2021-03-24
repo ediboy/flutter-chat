@@ -2,17 +2,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ChatModel {
   final String id;
-  final String author;
-  final String message;
+  final Map users;
+  final Map status;
 
-  ChatModel({this.id, this.author, this.message});
+  ChatModel({this.id, this.users, this.status});
 
   factory ChatModel.fromFirestore(DocumentSnapshot doc) {
     Map data = doc.data();
     return ChatModel(
       id: doc.id,
-      author: data['author_id'] ?? '',
-      message: data['message'] ?? '',
+      users: data['users'] ?? {},
+      status: data['status'] ?? {},
     );
   }
 }

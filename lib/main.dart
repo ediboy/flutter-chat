@@ -12,7 +12,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Ediboy Ilagan',
+      title: 'Flutter Chat',
       home: _Content(),
     );
   }
